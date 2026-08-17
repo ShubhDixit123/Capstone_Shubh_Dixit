@@ -1,0 +1,641 @@
+version: 2
+
+models:
+
+  # ============================================================
+  # DIMENSION: dim_product
+  # ============================================================
+  - name: dim_product
+    description: >
+      Product dimension. One row per product. Surrogate key generated in Gold;
+      natural key (product_id) carried through from Silver.
+    columns:
+      - name: product_key
+        description: Surrogate key (dbt_utils.generate_surrogate_key on product_id).
+        tests:
+          - unique
+          - not_null
+
+      - name: product_id
+        description: Natural key.
+        tests:
+          - unique
+          - not_null
+
+      - name: product_name
+        tests:
+          - not_null
+
+      - name: category
+        tests:
+          - not_null
+
+      - name: subcategory
+        tests:
+          - not_null
+
+      - name: unit_price
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: cost_price
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: supplier_id
+        description: Foreign key to dim_supplier (dimension-to-dimension relationship).
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_supplier')
+                field: supplier_id
+
+  # ============================================================
+  # DIMENSION: dim_supplier
+  # ============================================================
+  - name: dim_supplier
+    description: >
+      Supplier dimension. One row per supplier, including contract terms and
+      supplier scorecard metrics (delivery, defect, and returns rates).
+    columns:
+      - name: supplier_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: supplier_id
+        description: Natural key.
+        tests:
+          - unique
+          - not_null
+
+      - name: supplier_name
+        tests:
+          - not_null
+
+      - name: supplier_type
+        tests:
+          - not_null
+
+      - name: payment_terms
+        tests:
+          - not_null
+
+      - name: is_active
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+      - name: lead_time_days
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: minimum_order_quantity
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: on_time_delivery_rate
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+
+      - name: defect_rate
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+
+      - name: returns_percentage
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+
+      - name: contract_exclusivity
+        tests:
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+      - name: contract_renewal_option
+        tests:
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+  # ============================================================
+  # DIMENSION: dim_store
+  # ============================================================
+  - name: dim_store
+    description: >
+      Store dimension. One row per store, including size categorization,
+      store age, and performance metrics.
+    columns:
+      - name: store_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: store_id
+        description: Natural key.
+        tests:
+          - unique
+          - not_null
+
+      - name: store_name
+        tests:
+          - not_null
+
+      - name: region
+        tests:
+          - not_null
+
+      - name: store_type
+        tests:
+          - not_null
+
+      - name: size_category
+        description: Derived from size_sq_ft (Small <5000, Medium 5000-10000, Large >10000).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Small', 'Medium', 'Large']
+
+      - name: size_sq_ft
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: store_age_years
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: sales_target_achievement_percentage
+        description: (current_sales / sales_target) * 100, NULL when sales_target <= 0.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: revenue_per_sq_ft
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: employee_count
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: has_performance_issue
+        description: Flagged true when sales_target_achievement_percentage < 90.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+  # ============================================================
+  # DIMENSION: dim_date
+  # ============================================================
+  - name: dim_date
+    description: >
+      Date dimension generated programmatically from a dbt date spine
+      (2024-04-01 to 2024-09-27), not sourced from transactional data.
+      Calendar is complete and gap-free.
+    columns:
+      - name: date_key
+        description: Surrogate key in YYYYMMDD integer format.
+        tests:
+          - unique
+          - not_null
+
+      - name: full_date
+        tests:
+          - unique
+          - not_null
+
+      - name: year
+        tests:
+          - not_null
+
+      - name: quarter
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 4
+                inclusive: true
+
+      - name: month
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 12
+                inclusive: true
+
+      - name: week
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 53
+                inclusive: true
+
+      - name: day_of_week
+        description: Snowflake DAYOFWEEK() convention — 0 = Sunday ... 6 = Saturday.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 6
+                inclusive: true
+
+      - name: holiday_flag
+        description: US Holidays.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+      - name: season
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Spring', 'Summer', 'Fall', 'Winter']
+
+  # ============================================================
+  # DIMENSION: dim_marketing_campaign
+  # ============================================================
+  - name: dim_campaign
+    description: >
+      Marketing campaign dimension. Note: ROI is NOT stored here — it depends
+      on attributed sales and is calculated in fact_marketing_performance.
+    columns:
+      - name: campaign_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: campaign_id
+        description: Natural key.
+        tests:
+          - unique
+          - not_null
+
+      - name: campaign_name
+        tests:
+          - not_null
+
+      - name: campaign_type
+        tests:
+          - not_null
+
+      - name: channel
+        tests:
+          - not_null
+
+      - name: start_date
+        tests:
+          - not_null
+
+      - name: end_date
+        tests:
+          - not_null
+
+      - name: campaign_duration_days
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: audience_segment
+        tests:
+          - not_null
+
+      - name: budget
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: total_cost
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: total_revenue
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "end_date >= start_date"
+
+  # ============================================================
+  # DIMENSION: dim_customer
+  # ============================================================
+  - name: dim_customer
+    description: >
+      Customer dimension, current-state view (Silver SCD2 history is
+      flattened to current record here). One row per customer.
+    columns:
+      - name: customer_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: Natural key.
+        tests:
+          - unique
+          - not_null
+
+      - name: full_name
+        tests:
+          - not_null
+
+      - name: customer_age
+        tests:
+          - not_null:
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+                inclusive: true
+
+      - name: customer_segment
+        description: >
+          Derived from customer_age using non-overlapping bands;
+          defaults to 'Unknown' when birth_date/age is missing.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Young', 'Middle-aged', 'Senior', 'Unknown']
+
+      - name: email_id_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+      - name: phn_no_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+
+  # ============================================================
+  # FACT: fact_inventory
+  # Grain: one row per product per store per date.
+  # ============================================================
+  - name: fact_inventory
+    description: >
+      Periodic snapshot fact of inventory position. Grain: one row per
+      product per store per date. Purchased_quantity is the inferred delta
+      defined in the Silver inventory rules (no receiving events observed).
+    columns:
+      - name: inventory_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: product_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_key
+
+      - name: date_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: store_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_store')
+                field: store_key
+
+      - name: supplier_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_supplier')
+                field: supplier_key
+
+      - name: beginning_inventory
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: purchased_quantity
+        description: Inferred delta — not directly observed.
+        tests:
+          - not_null
+
+      - name: sold_quantity
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: ending_inventory
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: inventory_value
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: stock_turnover_ratio
+        description: Sold Quantity / Average Inventory, guarded against divide-by-zero.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: supplier_contribution_percentage
+        description: (Purchased Quantity from Supplier / Total Purchased Quantity) x 100.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+
+    tests:
+      # Declared grain: one row per product per store per date.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_key
+              - store_key
+              - date_key
+
+  # ============================================================
+  # FACT: fact_marketing_performance
+  # Grain: one row per campaign per date.
+  # ============================================================
+  - name: fact_marketing_performance
+    description: >
+      Grain: one row per campaign per date. ROI is calculated here (not in
+      dim_marketing_campaign) since it depends on attributed sales, which
+      first exist at this Gold layer via FACT_Sales.
+    columns:
+      - name: marketing_performance_key
+        description: Surrogate key.
+        tests:
+          - unique
+          - not_null
+
+      - name: campaign_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_marketing_campaign')
+                field: campaign_key
+
+      - name: date_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: total_sales_influenced
+        description: >
+          Can be negative (e.g. net refunds/cancellations exceeding sales
+          within the campaign window) — no lower-bound constraint.
+        tests:
+          - not_null
+
+      - name: new_customers_acquired
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: repeat_purchase_rate
+        description: >
+          100.0 * repeat-purchase count / first-purchase count. Since the two
+          counts are computed over potentially different customer sets, this
+          ratio is not mathematically guaranteed to stay <= 100 — only a
+          lower bound of 0 is enforced (counts can never be negative).
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: roi
+        description: >
+          (TotalSalesInfluenced - TotalCampaignCost) / TotalCampaignCost * 100,
+          NULL when TotalCampaignCost <= 0. No range bound — can be
+          arbitrarily negative when cost far exceeds influenced sales.
+
+    tests:
+      # Declared grain: one row per campaign per date.
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - campaign_key
+              - date_key

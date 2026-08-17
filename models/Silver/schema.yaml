@@ -1,0 +1,612 @@
+version: 2
+models:
+  - name: sl_customer
+    description: Cleaned and conformed customer master data. Deduplicated on customer_id via dbt snapshot
+      (dbt_valid_to is null). Adds full_name, age, and non-overlapping age-band segmentation (Young 18-35
+      / Middle-aged 36-55 / Senior 56+).
+    columns:
+      - name: customer_id
+        description: Natural key for the customer, sourced from the bronze snapshot.
+        tests:
+          - unique
+          - not_null
+      - name: full_name
+        tests:
+          - not_null
+      - name: first_name
+        tests:
+          - not_null
+      - name: last_name
+        tests:
+          - not_null
+      - name: birth_date
+        tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customer_age
+        tests:
+          - not_null:
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+                inclusive: true
+      - name: customer_segment
+        description: Derived from customer_age using non-overlapping bands; defaults to 'Unknown' when
+          birth_date/age is missing.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Young
+                  - Middle-aged
+                  - Senior
+                  - Unknown
+      - name: standardized_address
+        tests:
+          - not_null
+      - name: email_id_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: phn_no_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: last_modified_date
+        tests:
+          - not_null
+      - name: loaded_at
+        tests:
+          - not_null
+      - name: source_file
+        tests:
+          - not_null
+      - name: batch_id
+        tests:
+          - not_null
+  - name: sl_product
+    description: Cleaned product master data with full description, category hierarchy, profit margin
+      (divide-by-zero guarded), and low-stock flagging.
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        tests:
+          - not_null
+      - name: category
+        tests:
+          - not_null
+      - name: subcategory
+        tests:
+          - not_null
+      - name: product_line
+        tests:
+          - not_null
+      - name: profit_margin_percentage
+        description: (unit_price - cost_price) / unit_price * 100, NULL when unit_price <= 0. Bounded
+          above by 100 by construction; can be negative if cost exceeds price.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                max_value: 100
+                inclusive: true
+      - name: is_low_stock
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: unit_price
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: cost_price
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: stock_quantity
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: reorder_level
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: supplier_id
+        description: Foreign key to sl_supplier.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('sl_supplier')
+                field: supplier_id
+      - name: last_modified_date
+        tests:
+          - not_null
+  - name: sl_orders
+    description: Order-grain fact staging model. Aggregates order_items to order grain, calculates profitability
+      (discount applied as a rate, multiplicatively), order time-of-day buckets, and shipping/delivery
+      efficiency metrics.
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('sl_customer')
+                field: customer_id
+      - name: store_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('sl_store')
+                field: store_id
+      - name: campaign_id
+        description: Nullable — not every order is attributed to a campaign. The dbt relationships test
+          only evaluates non-null values, so organic orders (campaign_id is null) pass by design.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('sl_campaign')
+                field: campaign_id
+      - name: order_status
+        tests:
+          - not_null
+      - name: order_date
+        tests:
+          - not_null
+      - name: order_hour
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+                inclusive: true
+      - name: order_time_of_day
+        description: Derived from order_hour using half-open 24-hour ranges.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Morning
+                  - Afternoon
+                  - Evening
+                  - Night
+      - name: order_discount_amount
+        description: Discount expressed in PERCENTAGE POINTS (e.g. 5 = 5%), not a 0-1 fraction.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+      - name: total_items
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: total_quantity
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: profit_margin_percentage
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                max_value: 100
+                inclusive: true
+      - name: processing_days
+        description: DATEDIFF(day, order_date, shipping_date).
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: shipping_days
+        description: DATEDIFF(day, shipping_date, delivery_date).
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: delivery_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - On Time
+                  - Delayed
+                  - Potentially Delayed
+                  - In Transit
+      - name: last_modified_date
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: not (line_revenue <= 0 and profit_amount > 0)
+          config:
+            severity: warn
+  - name: sl_store
+    description: Cleaned store master data with size categorization, store age, and performance metrics
+      (all ratios divide-by-zero guarded).
+    columns:
+      - name: store_id
+        tests:
+          - unique
+          - not_null
+      - name: store_name
+        tests:
+          - not_null
+      - name: store_type
+        tests:
+          - not_null
+      - name: size_sq_ft
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: store_size_category
+        description: Derived from size_sq_ft (Small <5000, Medium 5000-10000, Large >10000).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Small
+                  - Medium
+                  - Large
+      - name: opening_date
+        tests:
+          - not_null
+      - name: store_age_years
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: postal_code_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: sales_target_achievement_percentage
+        description: (current_sales / sales_target) * 100, NULL when sales_target <= 0.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: revenue_per_sq_ft
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: employee_count
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: has_performance_issue
+        description: Flagged true when sales_target_achievement_percentage < 90.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: is_active
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: region
+        tests:
+          - not_null
+      - name: last_modified_date
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: sales_target_achievement_percentage is null or sales_target_achievement_percentage
+              >= 90 or has_performance_issue = true
+  - name: sl_supplier
+    description: Cleaned supplier master data with contact info, contract terms, and supplier scorecard
+      metrics (delivery, defect, and returns rates).
+    columns:
+      - name: supplier_id
+        tests:
+          - unique
+          - not_null
+      - name: supplier_name
+        tests:
+          - not_null
+      - name: supplier_type
+        tests:
+          - not_null
+      - name: payment_terms
+        tests:
+          - not_null
+      - name: is_active
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: lead_time_days
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: minimum_order_quantity
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: on_time_delivery_rate
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+      - name: defect_rate
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+      - name: returns_percentage
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+                inclusive: true
+      - name: contract_exclusivity
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: contract_renewal_option
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: last_modified_date
+        tests:
+          - not_null
+  - name: sl_campaign
+    description: 'Cleaned marketing campaign data. Budget/cost/revenue parsed from currency strings; duplicate
+      campaign records removed. NOTE: ROI is NOT calculated/validated here — attributed sales don''t exist
+      until Gold (FACT_MarketingPerformance). Silver only normalizes budget/cost figures.'
+    columns:
+      - name: campaign_id
+        tests:
+          - unique
+          - not_null
+      - name: campaign_name
+        tests:
+          - not_null
+      - name: campaign_type
+        tests:
+          - not_null
+      - name: channel
+        tests:
+          - not_null
+      - name: start_date
+        tests:
+          - not_null
+      - name: end_date
+        tests:
+          - not_null
+      - name: campaign_duration_days
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: budget
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: total_cost
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: total_revenue
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: audience_segment
+        tests:
+          - not_null
+      - name: last_modified_date
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: end_date >= start_date
+  - name: sl_inventory
+    description: 'Daily stock-position staging model, grain = one row per product per snapshot_date. Purchased_quantity
+      is an INFERRED delta (no receiving events exist): purchased_quantity = ending_stock - beginning_stock
+      + sold_quantity. Explicitly handles the 12-day product-snapshot gap via stale_snapshot_flag.'
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('sl_product')
+                field: product_id
+      - name: snapshot_date
+        tests:
+          - not_null
+      - name: beginning_stock
+        description: Prior-day stock_quantity.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: ending_stock
+        description: Current-day stock_quantity.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: sold_quantity
+        description: From flattened order_items, completed orders only.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: purchased_quantity
+        description: Inferred delta — not directly observed.
+        tests:
+          - not_null
+      - name: low_stock_flag
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: stale_snapshot_flag
+        description: Flags the known 12-day product-snapshot gap.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: negative_balance_flag
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+      - name: days_since_last_snapshot
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: reorder_level
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: loaded_at
+        tests:
+          - not_null
+      - name: batch_id
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_id
+              - snapshot_date
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: (beginning_stock >= 0 and ending_stock >= 0) or negative_balance_flag = true

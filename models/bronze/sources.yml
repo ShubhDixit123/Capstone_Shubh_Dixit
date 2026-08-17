@@ -1,0 +1,41 @@
+version: 2
+ 
+sources:
+ 
+  - name: external
+    database: CT_SHUBH_DIXIT_DB
+    schema: EXTERNAL
+ 
+    tables:
+      - name: external_campaign_data
+      - name: external_customer_data
+      - name: external_product_data
+      - name: external_orders_data
+      - name: external_employee_data
+      - name: external_store_data
+      - name: external_supplier_data
+ 
+ 
+  - name: bronze
+    database: CT_SHUBH_DIXIT_DB
+    schema: BRONZE
+ 
+    config:
+      freshness:
+        warn_after:
+          count: 1
+          period: day
+        error_after:
+          count: 2
+          period: day
+ 
+      loaded_at_field: _LOADED_AT
+ 
+    tables:
+      - name: br_campaign
+      - name: br_customer
+      - name: br_product
+      - name: br_orders
+      - name: br_employee
+      - name: br_store
+      - name: br_supplier
