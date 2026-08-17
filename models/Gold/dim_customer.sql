@@ -15,25 +15,17 @@ customer_dimension AS (
 
     SELECT
 
-        /* =================================================
-           SURROGATE KEY
-        ================================================= */
 
         {{ dbt_utils.generate_surrogate_key(
             ['customer_id']
         ) }} AS customer_key,
 
 
-        /* =================================================
-           NATURAL KEY
-        ================================================= */
+
 
         customer_id,
 
 
-        /* =================================================
-           CUSTOMER NAME
-        ================================================= */
 
         full_name,
 
@@ -42,10 +34,6 @@ customer_dimension AS (
         last_name,
 
 
-        /* =================================================
-           CUSTOMER DEMOGRAPHICS
-        ================================================= */
-
         birth_date,
 
         customer_age,
@@ -53,9 +41,6 @@ customer_dimension AS (
         customer_segment,
 
 
-        /* =================================================
-           ADDRESS
-        ================================================= */
 
         standardized_address,
 
@@ -70,9 +55,6 @@ customer_dimension AS (
         country,
 
 
-        /* =================================================
-           CONTACT INFORMATION
-        ================================================= */
 
         email_id,
 
@@ -83,9 +65,6 @@ customer_dimension AS (
         phn_no_is_valid,
 
 
-        /* =================================================
-           CUSTOMER ATTRIBUTES
-        ================================================= */
 
         income_bracket,
 
@@ -100,9 +79,6 @@ customer_dimension AS (
         preferred_payment_method,
 
 
-        /* =================================================
-           AUDIT / METADATA
-        ================================================= */
 
         last_modified_date,
 
