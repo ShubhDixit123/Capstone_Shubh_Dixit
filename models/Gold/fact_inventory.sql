@@ -3,39 +3,12 @@
     schema='GOLD'
 ) }}
 
+
 WITH source_inventory AS (
 
     SELECT *
 
     FROM {{ ref('sl_inventory') }}
-
-),
-
-active_stores AS (
-
-    SELECT
-
-        CAST(store_key AS VARCHAR) AS store_key,
-
-        store_id
-
-    FROM {{ ref('dim_store') }}
-
-),
-
-inventory_by_store AS (
-
-    SELECT
-
-        inventory_record.*,
-
-        store_record.store_id,
-
-        store_record.store_key
-
-    FROM source_inventory inventory_record
-
-    CROSS JOIN active_stores store_record
 
 ),
 
@@ -101,39 +74,24 @@ completed_sales_daily AS (
 
 ),
 
-/* =========================================================
-   SALES BETWEEN PREVIOUS AND CURRENT INVENTORY SNAPSHOT
-   ========================================================= */
-
 store_sales AS (
 
     SELECT
 
         inventory_record.product_id,
 
-        inventory_record.store_id,
-
         inventory_record.snapshot_date,
 
-        SUM(
-            COALESCE(
-                sales_record.sold_quantity,
-                0
-            )
-        ) AS sold_quantity
+        sales_record.store_id,
 
-    FROM inventory_by_store inventory_record
+        SUM(sales_record.sold_quantity) AS sold_quantity
 
-    LEFT JOIN completed_sales_daily sales_record
+    FROM source_inventory inventory_record
+
+    INNER JOIN completed_sales_daily sales_record
 
         ON inventory_record.product_id =
            sales_record.product_id
-
-       AND UPPER(
-            TRIM(
-                inventory_record.store_id
-            )
-           ) = sales_record.store_id
 
        AND sales_record.sold_date
            > inventory_record.previous_snapshot_date
@@ -145,9 +103,39 @@ store_sales AS (
 
         inventory_record.product_id,
 
-        inventory_record.store_id,
+        inventory_record.snapshot_date,
 
-        inventory_record.snapshot_date
+        sales_record.store_id
+
+),
+
+inventory_by_store AS (
+
+    SELECT
+
+        inventory_record.product_id,
+
+        inventory_record.snapshot_date,
+
+        store_sales_record.store_id,
+
+        inventory_record.beginning_stock,
+
+        inventory_record.purchased_quantity,
+
+        store_sales_record.sold_quantity,
+
+        inventory_record.ending_stock
+
+    FROM source_inventory inventory_record
+
+    LEFT JOIN store_sales store_sales_record
+
+        ON inventory_record.product_id =
+           store_sales_record.product_id
+
+       AND inventory_record.snapshot_date =
+           store_sales_record.snapshot_date
 
 ),
 
@@ -236,7 +224,7 @@ enriched_inventory AS (
         ) AS date_key,
 
         CAST(
-            inventory_record.store_key AS VARCHAR
+            store_record.store_key AS VARCHAR
         ) AS store_key,
 
         CAST(
@@ -260,7 +248,7 @@ enriched_inventory AS (
         inventory_record.purchased_quantity,
 
         COALESCE(
-            store_sales_record.sold_quantity,
+            inventory_record.sold_quantity,
             0
         ) AS sold_quantity,
 
@@ -277,20 +265,6 @@ enriched_inventory AS (
 
     FROM inventory_by_store inventory_record
 
-    LEFT JOIN store_sales store_sales_record
-
-        ON inventory_record.product_id =
-           store_sales_record.product_id
-
-       AND UPPER(
-            TRIM(
-                inventory_record.store_id
-            )
-           ) = store_sales_record.store_id
-
-       AND inventory_record.snapshot_date =
-           store_sales_record.snapshot_date
-
     LEFT JOIN {{ ref('dim_product') }} product_record
 
         ON inventory_record.product_id =
@@ -305,6 +279,11 @@ enriched_inventory AS (
 
         ON inventory_record.snapshot_date =
            date_record.full_date
+
+    LEFT JOIN {{ ref('dim_store') }} store_record
+
+        ON inventory_record.store_id =
+           UPPER(TRIM(store_record.store_id))
 
 ),
 

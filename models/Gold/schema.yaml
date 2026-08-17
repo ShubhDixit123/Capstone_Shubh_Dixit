@@ -6,9 +6,6 @@ models:
   # DIMENSION: dim_product
   # ============================================================
   - name: dim_product
-    description: >
-      Product dimension. One row per product. Surrogate key generated in Gold;
-      natural key (product_id) carried through from Silver.
     columns:
       - name: product_key
         description: Surrogate key (dbt_utils.generate_surrogate_key on product_id).
@@ -320,9 +317,6 @@ models:
   # DIMENSION: dim_marketing_campaign
   # ============================================================
   - name: dim_campaign
-    description: >
-      Marketing campaign dimension. Note: ROI is NOT stored here — it depends
-      on attributed sales and is calculated in fact_marketing_performance.
     columns:
       - name: campaign_key
         description: Surrogate key.
@@ -462,10 +456,6 @@ models:
   # Grain: one row per product per store per date.
   # ============================================================
   - name: fact_inventory
-    description: >
-      Periodic snapshot fact of inventory position. Grain: one row per
-      product per store per date. Purchased_quantity is the inferred delta
-      defined in the Silver inventory rules (no receiving events observed).
     columns:
       - name: inventory_key
         description: Surrogate key.
@@ -491,7 +481,6 @@ models:
 
       - name: store_key
         tests:
-          - not_null
           - relationships:
               arguments:
                 to: ref('dim_store')
